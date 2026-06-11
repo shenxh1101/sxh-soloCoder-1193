@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>计划「第五轮测试计划」录音前检查清单</title>
+    
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background: #f5f5f5;
+        color: #333;
+        padding: 20px;
+        line-height: 1.5;
+    }
+    .container { max-width: 1100px; margin: 0 auto; }
+    header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 12px;
+        margin-bottom: 20px;
+    }
+    header h1 { font-size: 26px; margin-bottom: 8px; }
+    header .meta { opacity: 0.9; font-size: 14px; margin-top: 6px; }
+    .stats-bar {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+    .stat-card {
+        background: white;
+        padding: 16px 20px;
+        border-radius: 8px;
+        flex: 1;
+        min-width: 140px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .stat-card .label { font-size: 12px; color: #888; margin-bottom: 4px; }
+    .stat-card .value { font-size: 22px; font-weight: 600; color: #333; }
+    .stat-card.warn .value { color: #e67e22; }
+    .stat-card.good .value { color: #27ae60; }
+    .stat-card.err .value { color: #e74c3c; }
+    .stat-card.info .value { color: #3498db; }
+    .group-section {
+        margin-bottom: 24px;
+    }
+    .group-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 2px solid #eee;
+    }
+    .group-badge {
+        display: inline-block;
+        padding: 4px 14px;
+        border-radius: 16px;
+        color: white;
+        font-size: 13px;
+        font-weight: 600;
+    }
+    .group-count {
+        font-size: 14px;
+        color: #888;
+    }
+    .check-card {
+        background: white;
+        border-radius: 8px;
+        padding: 16px 20px;
+        margin-bottom: 10px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+        display: flex;
+        align-items: flex-start;
+        gap: 20px;
+        flex-wrap: wrap;
+    }
+    .check-card-info {
+        flex: 1;
+        min-width: 200px;
+    }
+    .check-card-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #222;
+        margin-bottom: 4px;
+    }
+    .check-card-subtitle {
+        font-size: 12px;
+        color: #888;
+    }
+    .check-card-statuses {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .status-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 12px;
+        border-radius: 14px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .status-chip.ok { background: #d4edda; color: #155724; }
+    .status-chip.missing { background: #f8d7da; color: #721c24; }
+    .next-step-chip {
+        padding: 4px 12px;
+        border-radius: 14px;
+        font-size: 12px;
+        font-weight: 600;
+        color: white;
+    }
+    .missing-detail {
+        font-size: 12px;
+        color: #721c24;
+        margin-top: 6px;
+        padding-left: 8px;
+        border-left: 2px solid #e74c3c;
+    }
+    footer {
+        text-align: center;
+        color: #999;
+        font-size: 12px;
+        margin-top: 20px;
+        padding: 12px;
+    }
+</style>
+
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>计划「第五轮测试计划」录音前检查清单</h1>
+            <p class="meta">生成时间：2026-06-12 03:49:03</p>
+            <p class="meta">完整功能验证</p>
+        </header>
+        <div class="stats-bar">
+            <div class="stat-card good">
+                <div class="label">歌曲总数</div>
+                <div class="value">3 首</div>
+            </div>
+            <div class="stat-card err">
+                <div class="label">需补录</div>
+                <div class="value">2 首</div>
+            </div>
+            <div class="stat-card info">
+                <div class="label">待混音</div>
+                <div class="value">1 首</div>
+            </div>
+            <div class="stat-card good">
+                <div class="label">已完成</div>
+                <div class="value">0 首</div>
+            </div>
+            <div class="stat-card warn">
+                <div class="label">缺干声</div>
+                <div class="value">1 首</div>
+            </div>
+            <div class="stat-card warn">
+                <div class="label">缺伴奏</div>
+                <div class="value">2 首</div>
+            </div>
+        </div>
+        
+        <div class="group-section">
+            <div class="group-header">
+                <span class="group-badge" style="background:#e74c3c;">补录干声+伴奏</span>
+                <span class="group-count">1 首</span>
+            </div>
+            
+            <div class="check-card">
+                <div class="check-card-info">
+                    <div class="check-card-title">全部缺失歌曲</div>
+                    <div class="check-card-subtitle">歌手4 - 原曲4 &nbsp;|&nbsp; ID: 70988b80 &nbsp;|&nbsp; 未知 / 未知</div>
+                    <div class="missing-detail">干声: d:\code\TraeProjects\1193\test_audio\no_vocal.mp3 &middot; 伴奏: d:\code\TraeProjects\1193\test_audio\no_inst.mp3</div>
+                </div>
+                <div class="check-card-statuses">
+                    <span class="status-chip missing">&#10007; 干声</span>
+                    <span class="status-chip missing">&#10007; 伴奏</span>
+                    <span class="status-chip missing">&#10007; 混音</span>
+                    <span class="next-step-chip" style="background:#e74c3c;">补录干声+伴奏</span>
+                </div>
+            </div>
+            
+        </div>
+        
+        <div class="group-section">
+            <div class="group-header">
+                <span class="group-badge" style="background:#e67e22;">补录伴奏</span>
+                <span class="group-count">1 首</span>
+            </div>
+            
+            <div class="check-card">
+                <div class="check-card-info">
+                    <div class="check-card-title">测试歌曲B</div>
+                    <div class="check-card-subtitle">歌手B - 原曲B &nbsp;|&nbsp; ID: 979a95ff &nbsp;|&nbsp; 未知 / 14 B</div>
+                    <div class="missing-detail">伴奏: 未设置</div>
+                </div>
+                <div class="check-card-statuses">
+                    <span class="status-chip ok">&#10003; 干声</span>
+                    <span class="status-chip missing">&#10007; 伴奏</span>
+                    <span class="status-chip missing">&#10007; 混音</span>
+                    <span class="next-step-chip" style="background:#e67e22;">补录伴奏</span>
+                </div>
+            </div>
+            
+        </div>
+        
+        <div class="group-section">
+            <div class="group-header">
+                <span class="group-badge" style="background:#3498db;">待混音</span>
+                <span class="group-count">1 首</span>
+            </div>
+            
+            <div class="check-card">
+                <div class="check-card-info">
+                    <div class="check-card-title">测试歌曲A</div>
+                    <div class="check-card-subtitle">歌手A - 原曲A &nbsp;|&nbsp; ID: ddd9df5d &nbsp;|&nbsp; 未知 / 28 B</div>
+                    
+                </div>
+                <div class="check-card-statuses">
+                    <span class="status-chip ok">&#10003; 干声</span>
+                    <span class="status-chip ok">&#10003; 伴奏</span>
+                    <span class="status-chip missing">&#10007; 混音</span>
+                    <span class="next-step-chip" style="background:#3498db;">待混音</span>
+                </div>
+            </div>
+            
+        </div>
+        
+        <footer>由 Cover Song Manager 录音前检查包生成</footer>
+    </div>
+</body>
+</html>

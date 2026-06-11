@@ -376,7 +376,20 @@ def song_collect(song_id, output_dir, copy_mixes, yes, dry_run, zip_output):
             f.write(f"\n## 备注\n\n{song.notes}\n")
 
     total_size_val = sum(os.path.getsize(dst) for _, _, dst, _ in copied if os.path.exists(dst))
-    
+
+    import csv as csv_mod
+    archive_csv_path = os.path.join(work_dir, "归档索引.csv")
+    with open(archive_csv_path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv_mod.writer(f)
+        writer.writerow(["歌曲ID", "歌曲名称", "素材类型", "原路径", "包内路径", "大小", "状态"])
+        for label, src, dst, size in copied:
+            arc = f"{safe_name}_{song.id}/{os.path.basename(dst)}"
+            writer.writerow([song.id, song.title, label, src, arc, size, "已收入"])
+        for m in missing_files:
+            m_label = m.split(":")[0]
+            m_path = m.split(":", 1)[1].strip() if ":" in m else ""
+            writer.writerow([song.id, song.title, m_label, m_path, "", "", "缺失"])
+
     # 如果是 zip 模式，打包并清理临时目录
     final_output = song_dir
     if zip_output:
@@ -387,6 +400,7 @@ def song_collect(song_id, output_dir, copy_mixes, yes, dry_run, zip_output):
                 arcname = os.path.relpath(dst, temp_dir)
                 zf.write(dst, arcname)
             zf.write(manifest_path, os.path.relpath(manifest_path, temp_dir))
+            zf.write(archive_csv_path, os.path.relpath(archive_csv_path, temp_dir))
         final_output = zip_path
         # 清理临时目录
         try:
@@ -976,7 +990,13 @@ def plan_show(plan_id):
     click.echo(f"ID：{plan_obj.id}")
     if plan_obj.description:
         click.echo(f"描述：{plan_obj.description}")
-    click.echo(f"歌曲数量：{final_count} 首\n")
+
+    invalid_ids = [sid for sid in plan_obj.song_ids if not store.get_song(sid)]
+    valid_total = final_count - len(invalid_ids)
+    click.echo(f"歌曲数量：{valid_total} 首" + (f"（另有 {len(invalid_ids)} 个失效引用）" if invalid_ids else ""))
+    if invalid_ids:
+        click.echo(f"  失效引用 ID: {', '.join(invalid_ids)}（使用 'plan clean' 清理）")
+    click.echo("")
 
     songs_data = []
     missing_count = 0
@@ -989,7 +1009,7 @@ def plan_show(plan_id):
     for sid in plan_obj.song_ids:
         song = store.get_song(sid)
         if not song:
-            click.echo(f"  [{sid}] <歌曲已删除>")
+            click.echo(f"  [{sid}] <歌曲已删除 - 失效引用>")
             continue
         songs_data.append(song)
         s_stats = collect_song_audio_stats(song.vocal_path, song.instrumental_path, song.mix_versions)
@@ -1056,6 +1076,7 @@ def plan_status(plan_id):
     click.echo("=" * 60)
     if invalid_ids:
         click.echo(f"  {E_WARN}  有 {len(invalid_ids)} 首歌曲引用已失效，使用 'plan clean' 可清理")
+        click.echo(f"  失效引用 ID: {', '.join(invalid_ids)}")
         click.echo("")
 
     ready_count = 0
@@ -1254,7 +1275,7 @@ def plan_export(plan_id, output, missing_only, exists_only):
         sys.exit(1)
 
     output_path = output or f"plan_{plan_obj.id}_report.html"
-    result = export_plan_html(plan_obj, songs, output_path, filter_type=filter_type, missing_refs=missing_refs)
+    result = export_plan_html(plan_obj, songs, output_path, filter_type=filter_type, missing_refs=missing_refs, invalid_ids=[sid for sid in plan_obj.song_ids if not store.get_song(sid)])
 
     filter_msg = ""
     if filter_type == "missing":
@@ -1263,8 +1284,9 @@ def plan_export(plan_id, output, missing_only, exists_only):
         filter_msg = "（仅含已存在文件的歌曲）"
 
     click.echo(f"{E_OK} 已导出计划「{plan_obj.name}」到：{output_path} {filter_msg}")
-    click.echo(f"   有效歌曲: {len(songs)} 首" + (f"（{missing_refs} 首引用已删除）" if missing_refs else ""))
-    click.echo(f"   筛选后歌曲: {result['total_songs']} 首, 总时长: {format_duration(result['total_duration'])}, 总大小: {format_file_size(result['total_size'])}")
+    if missing_refs:
+        click.echo(f"   失效引用: {missing_refs} 首（使用 'plan clean {plan_id}' 清理）")
+    click.echo(f"   歌曲数: {result['total_songs']} 首, 总时长: {format_duration(result['total_duration'])}, 总大小: {format_file_size(result['total_size'])}")
     if filter_type == "missing":
         click.echo(f"   缺失文件项: {result['missing_files']} 个 {E_WARN}")
     elif filter_type == "exists":
@@ -1334,6 +1356,7 @@ def plan_check(plan_id, output_dir, name):
 
     if missing_refs:
         click.echo(f"\n{E_WARN}  有 {missing_refs} 首歌曲引用已失效，可使用 'plan clean {plan_id}' 清理")
+        click.echo(f"   失效引用 ID: {', '.join(invalid_ids)}")
 
 
 @plan.command("collect")
@@ -1426,6 +1449,8 @@ def plan_collect(plan_id, output_dir, copy_mixes, yes, dry_run, zip_output):
     else:
         click.echo(f"  目标目录: {plan_dir}")
     click.echo(f"  歌曲数量: {len(songs)} 首" + (f"（{missing_refs} 首引用已删除）" if missing_refs else ""))
+    if invalid_ids:
+        click.echo(f"  失效引用 ID: {', '.join(invalid_ids)}")
     click.echo(f"  文件总数: {total_files} 个")
     click.echo(f"  总大小: {format_file_size(total_size)}")
 
@@ -1496,8 +1521,10 @@ def plan_collect(plan_id, output_dir, copy_mixes, yes, dry_run, zip_output):
 
         collected.append((song, song_dir, len(song_copied), manifest_path))
 
-    # 总清单
+    # 总清单 + 归档索引
     total_manifest = os.path.join(work_dir, "00_计划总清单.md")
+    archive_csv = os.path.join(work_dir, "00_归档索引.csv")
+    archive_md = os.path.join(work_dir, "00_归档索引.md")
     with open(total_manifest, "w", encoding="utf-8") as f:
         f.write(f"# {plan_obj.name} - 完整素材总清单\n\n")
         if plan_obj.description:
@@ -1529,9 +1556,63 @@ def plan_collect(plan_id, output_dir, copy_mixes, yes, dry_run, zip_output):
             for m in missing_summary:
                 f.write(f"- {E_WARN}  {m}\n")
 
+    import csv as csv_mod
+    with open(archive_csv, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv_mod.writer(f)
+        writer.writerow(["歌曲ID", "歌曲名称", "素材类型", "原路径", "包内路径", "大小", "状态"])
+        for song, song_dir, _, _ in collected:
+            st = collect_song_audio_stats(song.vocal_path, song.instrumental_path, song.mix_versions)
+            safe_name = "".join(c for c in song.title if c.isalnum() or c in safe_chars).strip()
+            safe_name = safe_name or f"song_{song.id}"
+            rel_dir = f"{safe_name}_{song.id}"
+            if st["vocal"]["exists"]:
+                writer.writerow([song.id, song.title, "干声", st["vocal"]["path"],
+                                 f"{rel_dir}/{os.path.basename(st['vocal']['path'])}",
+                                 format_file_size(st["vocal"]["size"]), "已收入"])
+            elif song.vocal_path:
+                writer.writerow([song.id, song.title, "干声", song.vocal_path, "", "", "缺失"])
+            if st["instrumental"]["exists"]:
+                writer.writerow([song.id, song.title, "伴奏", st["instrumental"]["path"],
+                                 f"{rel_dir}/{os.path.basename(st['instrumental']['path'])}",
+                                 format_file_size(st["instrumental"]["size"]), "已收入"])
+            elif song.instrumental_path:
+                writer.writerow([song.id, song.title, "伴奏", song.instrumental_path, "", "", "缺失"])
+            if copy_mixes:
+                for m in st["mixes"]:
+                    if m["exists"]:
+                        writer.writerow([song.id, song.title, f"混音v{m['version']:03d}", m["path"],
+                                         f"{rel_dir}/{os.path.basename(m['path'])}",
+                                         format_file_size(m["size"]), "已收入"])
+
+    with open(archive_md, "w", encoding="utf-8") as f:
+        f.write(f"# {plan_obj.name} - 归档索引\n\n")
+        f.write(f"- **计划ID**: {plan_obj.id}\n")
+        f.write(f"- **生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        for song, song_dir, _, _ in collected:
+            st = collect_song_audio_stats(song.vocal_path, song.instrumental_path, song.mix_versions)
+            safe_name = "".join(c for c in song.title if c.isalnum() or c in safe_chars).strip()
+            safe_name = safe_name or f"song_{song.id}"
+            rel_dir = f"{safe_name}_{song.id}"
+            f.write(f"## {song.title} [{song.id}]\n\n")
+            f.write("| 类型 | 原路径 | 包内路径 | 大小 | 状态 |\n")
+            f.write("|------|--------|----------|------|------|\n")
+            if st["vocal"]["exists"]:
+                f.write(f"| 干声 | {st['vocal']['path']} | {rel_dir}/{os.path.basename(st['vocal']['path'])} | {format_file_size(st['vocal']['size'])} | 已收入 |\n")
+            elif song.vocal_path:
+                f.write(f"| 干声 | {song.vocal_path} | - | - | 缺失 |\n")
+            if st["instrumental"]["exists"]:
+                f.write(f"| 伴奏 | {st['instrumental']['path']} | {rel_dir}/{os.path.basename(st['instrumental']['path'])} | {format_file_size(st['instrumental']['size'])} | 已收入 |\n")
+            elif song.instrumental_path:
+                f.write(f"| 伴奏 | {song.instrumental_path} | - | - | 缺失 |\n")
+            if copy_mixes:
+                for m in st["mixes"]:
+                    if m["exists"]:
+                        f.write(f"| 混音v{m['version']:03d} | {m['path']} | {rel_dir}/{os.path.basename(m['path'])} | {format_file_size(m['size'])} | 已收入 |\n")
+            f.write("\n")
+
     # 生成 HTML 报告
     html_path = os.path.join(work_dir, "00_素材清单.html")
-    export_plan_html(plan_obj, songs, html_path)
+    export_plan_html(plan_obj, songs, html_path, invalid_ids=[sid for sid in plan_obj.song_ids if not store.get_song(sid)])
 
     # zip 模式：打包并清理临时目录
     if zip_output:
@@ -1557,10 +1638,11 @@ def plan_collect(plan_id, output_dir, copy_mixes, yes, dry_run, zip_output):
         click.echo(f"   目录: {plan_dir}")
         click.echo(f"   收集了 {len(collected)} 首歌，{total_files} 个文件")
         click.echo(f"   总清单: {total_manifest}")
+        click.echo(f"   归档索引: {archive_csv}")
         click.echo(f"   HTML报告: {html_path}")
 
     if missing_refs:
-        click.echo(f"   {E_WARN}  有 {missing_refs} 首歌曲引用已删除，已跳过")
+        click.echo(f"   {E_WARN}  有 {missing_refs} 首歌曲引用已删除，已跳过（ID: {', '.join(invalid_ids)}）")
 
 
 def main():

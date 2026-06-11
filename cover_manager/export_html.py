@@ -580,12 +580,14 @@ def export_plan_html(
     output_path: str,
     filter_type: Optional[str] = None,
     missing_refs: int = 0,
+    invalid_ids: List[str] = None,
 ) -> Dict[str, Any]:
     """
     导出翻唱计划为 HTML（增强版：列出所有相关文件路径、大小、缺失状态）
 
     filter_type: None=全部, "missing"=仅缺失文件, "exists"=仅已有文件
     missing_refs: 失效引用的歌曲数量
+    invalid_ids: 失效引用的歌曲 ID 列表
     返回统计数据字典，供调用方使用
     """
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -613,14 +615,14 @@ def export_plan_html(
     # 计划的整体素材汇总
     missing_refs_html = ""
     if missing_refs > 0:
-        missing_refs_html = f' &nbsp;|&nbsp; <span style="color:#e67e22;">失效引用: {missing_refs} 首</span>'
+        ids_str = ", ".join(h(i) for i in (invalid_ids or []))
+        missing_refs_html = f' &nbsp;|&nbsp; <span style="color:#e67e22;">失效引用: {missing_refs} 首（ID: {ids_str}）</span>'
 
     plan_summary = f"""
     <div class="plan-summary">
         <div style="font-weight:600; font-size:15px; margin-bottom:10px;">[DIR] 素材整理清单 (ID: {h(plan.id)})</div>
         <div style="font-size:13px; color:#666; line-height:1.8;">
-            歌曲数: {len(songs)} 首{missing_refs_html} &nbsp;|&nbsp;
-            筛选后歌曲: {filtered_stats["total_songs"]} 首 &nbsp;|&nbsp;
+            筛选后歌曲: {filtered_stats["total_songs"]} 首{missing_refs_html} &nbsp;|&nbsp;
             总时长: {format_duration(filtered_stats["total_duration"])} &nbsp;|&nbsp;
             总大小: {format_file_size(filtered_stats["total_size"])} &nbsp;|&nbsp;
             文件项: <strong style="color:{missing_color};">{filtered_stats["total_files"]} 个</strong>
