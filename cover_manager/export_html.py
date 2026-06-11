@@ -1,4 +1,5 @@
 """HTML 导出功能"""
+import html
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import os
@@ -7,6 +8,13 @@ from .models import SongProject, CoverPlan
 from .audio_utils import (
     format_duration, format_file_size, collect_song_audio_stats,
 )
+
+
+def h(text: Any) -> str:
+    """HTML 转义：将任意值转换为安全的 HTML 文本
+    防止用户输入的特殊字符（<, >, &, ", '）破坏页面结构
+    """
+    return html.escape(str(text), quote=True)
 
 BASE_CSS = """
 <style>
@@ -205,18 +213,18 @@ def _render_file_item(label: str, file_info: Dict[str, Any], extra_label: str = 
 
     cls = "file-ok" if exists else "file-missing"
 
-    extra_html = f" <span style='color:#888'>{extra_label}</span>" if extra_label else ""
+    extra_html = f" <span style='color:#888'>{h(extra_label)}</span>" if extra_label else ""
 
     return f"""
     <li class="{cls}">
         <div style="flex: 1; min-width: 280px;">
             <div class="file-label">
-                {_render_status_badge(exists)} {label} {extra_html}
+                {_render_status_badge(exists)} {h(label)} {extra_html}
             </div>
-            <div class="file-path">{path}</div>
+            <div class="file-path">{h(path)}</div>
         </div>
         <div class="file-meta">
-            时长: {duration_str} · 大小: {size_str}
+            时长: {h(duration_str)} · 大小: {h(size_str)}
         </div>
     </li>
     """
@@ -231,8 +239,8 @@ def _render_params(post_processing_params: Dict[str, Any]) -> str:
     for k, v in post_processing_params.items():
         items.append(f"""
         <div class="param-item">
-            <div class="param-key">{k}</div>
-            <div class="param-value">{v}</div>
+            <div class="param-key">{h(k)}</div>
+            <div class="param-value">{h(v)}</div>
         </div>
         """)
     return f'<div class="params-table">{"".join(items)}</div>'
@@ -244,7 +252,10 @@ def _render_song_card(song: SongProject, show_plan_context: bool = False) -> Dic
 
     返回 (html_string, stats_dict)
     """
-    tags_html = "".join(f'<span class="tag {_tag_class(t)}">{t}</span>' for t in song.tags)
+    tags_html = "".join(
+        f'<span class="tag {_tag_class(t)}">{h(t)}</span>'
+        for t in song.tags
+    )
     if not tags_html:
         tags_html = '<span class="tag" style="background:#eee; color:#888;">无标签</span>'
 
@@ -299,18 +310,20 @@ def _render_song_card(song: SongProject, show_plan_context: bool = False) -> Dic
     # 备注
     notes_html = ""
     if song.notes:
-        notes_html = f'<div class="song-notes" style="margin-top:12px;">📝 {song.notes}</div>'
+        notes_html = f'<div class="song-notes" style="margin-top:12px;">📝 {h(song.notes)}</div>'
+
+    updated_at_str = song.updated_at[:19].replace('T', ' ') if song.updated_at else "未知"
 
     card = f"""
     <div class="song-card">
         <div class="song-header">
             <div>
-            <div class="song-title">{song.title}</div>
-            <div class="song-original">原唱: {song.original_artist} · 原曲: {song.original_song}</div>
+            <div class="song-title">{h(song.title)}</div>
+            <div class="song-original">原唱: {h(song.original_artist)} · 原曲: {h(song.original_song)}</div>
             </div>
             <div>{tags_html}</div>
         </div>
-        <div style="font-size:12px; color:#aaa;">ID: {song.id} · 更新于 {song.updated_at[:19].replace('T', ' ')}</div>
+        <div style="font-size:12px; color:#aaa;">ID: {h(song.id)} · 更新于 {h(updated_at_str)}</div>
         <div class="section-title">文件清单</div>
         {files_html}
         <div class="section-title">后期处理参数</div>
@@ -365,34 +378,71 @@ def export_songs_html(
     output_path: str,
     title: str = "翻唱歌曲项目清单",
     subtitle_extra: str = "",
+    filter_type: Optional[str] = None,
 ) -> str:
-    """导出歌曲列表为 HTML"""
+    """
+    导出歌曲列表为 HTML
+
+    filter_type: None=全部, "missing"=仅缺失文件, "exists"=仅已有文件
+    """
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     global_stats = _compute_global_stats(songs)
 
+    # 根据 filter_type 过滤每首歌的文件展示
+    filtered_songs = []
+    if filter_type == "missing":
+        for s in songs:
+            st = collect_song_audio_stats(s.vocal_path, s.instrumental_path, s.mix_versions)
+            has_missing = (
+                not st["vocal"]["exists"]
+                or not st["instrumental"]["exists"]
+                or any(not m["exists"] for m in st["mixes"])
+            )
+            if has_missing:
+                filtered_songs.append(s)
+    elif filter_type == "exists":
+        for s in songs:
+            st = collect_song_audio_stats(s.vocal_path, s.instrumental_path, s.mix_versions)
+            has_exists = (
+                st["vocal"]["exists"]
+                or st["instrumental"]["exists"]
+                or any(m["exists"] for m in st["mixes"])
+            )
+            if has_exists:
+                filtered_songs.append(s)
+    else:
+        filtered_songs = songs
+
     # 渲染每首歌
     cards_html = ""
-    for s in songs:
+    for s in filtered_songs:
         render_result = _render_song_card(s)
         cards_html += render_result["html"]
 
-    subtitle_html = f'<p class="subtitle">{subtitle_extra}</p>' if subtitle_extra else ""
+    subtitle_html = f'<p class="subtitle">{h(subtitle_extra)}</p>' if subtitle_extra else ""
     missing_cls_1 = "warn" if global_stats["missing_files"] > 0 else "good"
+
+    filter_note = ""
+    if filter_type == "missing":
+        filter_note = '<p class="meta">🔍 仅显示含有缺失文件的歌曲</p>'
+    elif filter_type == "exists":
+        filter_note = '<p class="meta">🔍 仅显示含有已存在文件的歌曲</p>'
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
+    <title>{h(title)}</title>
     {BASE_CSS}
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>{title}</h1>
-            <p class="subtitle">生成时间：{generated_at}</p>
+            <h1>{h(title)}</h1>
+            <p class="subtitle">生成时间：{h(generated_at)}</p>
             {subtitle_html}
+            {filter_note}
         </header>
         <div class="stats-bar">
             <div class="stat-card good">
@@ -416,7 +466,7 @@ def export_songs_html(
                 <div class="value">{global_stats["missing_files"]} 个</div>
             </div>
         </div>
-        {cards_html if cards_html else '<div style="background:white; padding:40px; border-radius:8px; text-align:center; color:#888;">暂无歌曲项目</div>'}
+        {cards_html if cards_html else '<div style="background:white; padding:40px; border-radius:8px; text-align:center; color:#888;">暂无匹配的歌曲项目</div>'}
         <footer>由 Cover Song Manager 生成</footer>
     </div>
 </body>
@@ -432,26 +482,61 @@ def export_plan_html(
     plan: CoverPlan,
     songs: List[SongProject],
     output_path: str,
+    filter_type: Optional[str] = None,
 ) -> str:
     """
-    导出翻唱计划为 HTML（增强版：列出所有相关文件路径、大小、缺失状态）"""
+    导出翻唱计划为 HTML（增强版：列出所有相关文件路径、大小、缺失状态）
+
+    filter_type: None=全部, "missing"=仅缺失文件, "exists"=仅已有文件
+    """
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     global_stats = _compute_global_stats(songs)
 
+    # 过滤歌曲
+    filtered_songs = []
+    if filter_type == "missing":
+        for s in songs:
+            st = collect_song_audio_stats(s.vocal_path, s.instrumental_path, s.mix_versions)
+            has_missing = (
+                not st["vocal"]["exists"]
+                or not st["instrumental"]["exists"]
+                or any(not m["exists"] for m in st["mixes"])
+            )
+            if has_missing:
+                filtered_songs.append(s)
+    elif filter_type == "exists":
+        for s in songs:
+            st = collect_song_audio_stats(s.vocal_path, s.instrumental_path, s.mix_versions)
+            has_exists = (
+                st["vocal"]["exists"]
+                or st["instrumental"]["exists"]
+                or any(m["exists"] for m in st["mixes"])
+            )
+            if has_exists:
+                filtered_songs.append(s)
+    else:
+        filtered_songs = songs
+
     # 渲染每首歌
     cards_html = ""
-    for s in songs:
+    for s in filtered_songs:
         render_result = _render_song_card(s, show_plan_context=True)
         cards_html += render_result["html"]
 
-    desc_html = f'<p class="meta">📋 {plan.description}</p>' if plan.description else ""
+    desc_html = f'<p class="meta">📋 {h(plan.description)}</p>' if plan.description else ""
     missing_cls_2 = "warn" if global_stats["missing_files"] > 0 else "good"
     missing_color = "#e74c3c" if global_stats["missing_files"] > 0 else "#27ae60"
+
+    filter_note = ""
+    if filter_type == "missing":
+        filter_note = '<p class="meta">🔍 仅显示含有缺失文件的歌曲</p>'
+    elif filter_type == "exists":
+        filter_note = '<p class="meta">🔍 仅显示含有已存在文件的歌曲</p>'
 
     # 计划的整体素材汇总
     plan_summary = f"""
     <div class="plan-summary">
-        <div style="font-weight:600; font-size:15px; margin-bottom:10px;">📂 素材整理清单 (ID: {plan.id})</div>
+        <div style="font-weight:600; font-size:15px; margin-bottom:10px;">📂 素材整理清单 (ID: {h(plan.id)})</div>
         <div style="font-size:13px; color:#666; line-height:1.8;">
             歌曲数: {len(songs)} 首 &nbsp;|&nbsp;
             总时长: {format_duration(global_stats["total_duration"])} &nbsp;|&nbsp;
@@ -466,15 +551,16 @@ def export_plan_html(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>翻唱计划：{plan.name}</title>
+    <title>翻唱计划：{h(plan.name)}</title>
     {BASE_CSS}
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🎵 翻唱计划：{plan.name}</h1>
-            <p class="subtitle">生成时间：{generated_at}</p>
+            <h1>🎵 翻唱计划：{h(plan.name)}</h1>
+            <p class="subtitle">生成时间：{h(generated_at)}</p>
             {desc_html}
+            {filter_note}
         </header>
         {plan_summary}
         <div class="stats-bar">
@@ -499,7 +585,7 @@ def export_plan_html(
                 <div class="value">{global_stats["missing_files"]} 个</div>
             </div>
         </div>
-        {cards_html if cards_html else '<div style="background:white; padding:40px; border-radius:8px; text-align:center; color:#888;">暂无歌曲项目</div>'}
+        {cards_html if cards_html else '<div style="background:white; padding:40px; border-radius:8px; text-align:center; color:#888;">暂无匹配的歌曲项目</div>'}
         <footer>由 Cover Song Manager 生成</footer>
     </div>
 </body>

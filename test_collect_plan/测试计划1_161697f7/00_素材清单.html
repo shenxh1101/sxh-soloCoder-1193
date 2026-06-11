@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>翻唱计划：测试计划1</title>
+    
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background: #f5f5f5;
+        color: #333;
+        padding: 20px;
+        line-height: 1.5;
+    }
+    .container { max-width: 1280px; margin: 0 auto; }
+    header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 12px;
+        margin-bottom: 20px;
+    }
+    header h1 { font-size: 28px; margin-bottom: 8px; }
+    header .subtitle, header .meta { opacity: 0.9; font-size: 14px; margin-top: 6px; }
+    .stats-bar {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+    .stat-card {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        flex: 1;
+        min-width: 160px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .stat-card .label { font-size: 13px; color: #888; margin-bottom: 6px; }
+    .stat-card .value { font-size: 24px; font-weight: 600; color: #333; }
+    .stat-card.warn .value { color: #e67e22; }
+    .stat-card.good .value { color: #27ae60; }
+    .song-card {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .song-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 16px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    .song-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #222;
+    }
+    .song-original {
+        color: #888;
+        font-size: 13px;
+        margin-top: 4px;
+    }
+    .tag {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 500;
+        margin-right: 4px;
+        margin-bottom: 4px;
+    }
+    .tag-done { background: #d4edda; color: #155724; }
+    .tag-mixing { background: #fff3cd; color: #856404; }
+    .tag-tuning { background: #f8d7da; color: #721c24; }
+    .section-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #555;
+        margin: 14px 0 8px;
+        padding-left: 8px;
+        border-left: 3px solid #667eea;
+    }
+    .file-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+    .file-list li {
+        padding: 10px 12px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 8px;
+        background: #fafafa;
+    }
+    .file-list li.file-ok { border-left: 3px solid #27ae60; }
+    .file-list li.file-missing { border-left: 3px solid #e74c3c; background: #fff5f5; }
+    .file-meta {
+        font-family: monospace;
+        font-size: 12px;
+        color: #555;
+    }
+    .file-label {
+        font-weight: 600;
+        font-size: 13px;
+        margin-bottom: 2px;
+    }
+    .file-path {
+        font-family: monospace;
+        font-size: 12px;
+        color: #444;
+        word-break: break-all;
+    }
+    .missing-badge {
+        background: #e74c3c;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+    .ok-badge {
+        background: #27ae60;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+    .params-table {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 8px;
+    }
+    .param-item {
+        background: #f8f9fa;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        border: 1px solid #eee;
+    }
+    .param-key { color: #888; font-size: 11px; }
+    .param-value { font-weight: 600; }
+    .no-params { color: #aaa; font-size: 13px; padding: 8px; }
+    .song-notes {
+        background: #fffbe6;
+        padding: 10px 14px;
+        border-left: 3px solid #f0c36d;
+        border-radius: 4px;
+        color: #7a5c00;
+        font-size: 13px;
+    }
+    footer {
+        text-align: center;
+        color: #999;
+        font-size: 12px;
+        margin-top: 20px;
+        padding: 12px;
+    }
+    .plan-summary {
+        background: white;
+        padding: 16px 20px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+</style>
+
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎵 翻唱计划：测试计划1</h1>
+            <p class="subtitle">生成时间：2026-06-12 03:04:22</p>
+            <p class="meta">📋 测试去重和导出</p>
+            
+        </header>
+        
+    <div class="plan-summary">
+        <div style="font-weight:600; font-size:15px; margin-bottom:10px;">📂 素材整理清单 (ID: 161697f7)</div>
+        <div style="font-size:13px; color:#666; line-height:1.8;">
+            歌曲数: 4 首 &nbsp;|&nbsp;
+            总时长: 0:00 &nbsp;|&nbsp;
+            总大小: 210 B &nbsp;|&nbsp;
+            缺失文件: <strong style="color:#e74c3c;">3 个</strong>
+        </div>
+    </div>
+    
+        <div class="stats-bar">
+            <div class="stat-card good">
+                <div class="label">歌曲数量</div>
+                <div class="value">4 首</div>
+            </div>
+            <div class="stat-card good">
+                <div class="label">总时长</div>
+                <div class="value">0:00</div>
+            </div>
+            <div class="stat-card good">
+                <div class="label">总占用空间</div>
+                <div class="value">210 B</div>
+            </div>
+            <div class="stat-card good">
+                <div class="label">混音版本总数</div>
+                <div class="value">0 个</div>
+            </div>
+            <div class="stat-card warn">
+                <div class="label">缺失文件</div>
+                <div class="value">3 个</div>
+            </div>
+        </div>
+        
+    <div class="song-card">
+        <div class="song-header">
+            <div>
+            <div class="song-title">测试&lt;song&gt;1 &amp; &lt;特殊&gt;字符</div>
+            <div class="song-original">原唱: 测试&#x27;歌手&#x27; · 原曲: 原曲&amp;quot;引号&amp;quot;测试</div>
+            </div>
+            <div><span class="tag" style="background:#eee; color:#888;">无标签</span></div>
+        </div>
+        <div style="font-size:12px; color:#aaa;">ID: 555b938a · 更新于 2026-06-12 03:01:46</div>
+        <div class="section-title">文件清单</div>
+        <ul class="file-list">
+    <li class="file-ok">
+        <div style="flex: 1; min-width: 280px;">
+            <div class="file-label">
+                <span class="ok-badge">存在</span> 干声 (Vocal) 
+            </div>
+            <div class="file-path">d:\code\TraeProjects\1193\test_audio\vocal1.mp3</div>
+        </div>
+        <div class="file-meta">
+            时长: 未知 · 大小: 42 B
+        </div>
+    </li>
+    
+    <li class="file-ok">
+        <div style="flex: 1; min-width: 280px;">
+            <div class="file-label">
+                <span class="ok-badge">存在</span> 伴奏 (Instrumental) 
+            </div>
+            <div class="file-path">d:\code\TraeProjects\1193\test_audio\instrumental1.mp3</div>
+        </div>
+        <div class="file-meta">
+            时长: 未知 · 大小: 42 B
+        </div>
+    </li>
+    
+        <li class="file-missing">
+            <div style="flex:1; min-width:280px;">
+                <div class="file-label"><span class="missing-badge">缺失</span> 混音文件</div>
+                <div class="file-path">暂无混音版本</div>
+            </div>
+        </li>
+        </ul>
+        <div class="section-title">后期处理参数</div>
+        <div class="params-table">
+        <div class="param-item">
+            <div class="param-key">压缩比</div>
+            <div class="param-value">4:1</div>
+        </div>
+        
+        <div class="param-item">
+            <div class="param-key">混响</div>
+            <div class="param-value">大厅</div>
+        </div>
+        
+        <div class="param-item">
+            <div class="param-key">EQ_高音</div>
+            <div class="param-value">+2dB &amp; &lt;特殊&gt;</div>
+        </div>
+        </div>
+        <div class="song-notes" style="margin-top:12px;">📝 备注包含&lt;b&gt;HTML标签&lt;/b&gt; &amp; 特殊符号</div>
+    </div>
+    
+    <div class="song-card">
+        <div class="song-header">
+            <div>
+            <div class="song-title">普通歌曲2</div>
+            <div class="song-original">原唱: 歌手2 · 原曲: 原曲2</div>
+            </div>
+            <div><span class="tag" style="background:#eee; color:#888;">无标签</span></div>
+        </div>
+        <div style="font-size:12px; color:#aaa;">ID: e6e0e152 · 更新于 2026-06-12 03:00:41</div>
+        <div class="section-title">文件清单</div>
+        <ul class="file-list">
+    <li class="file-ok">
+        <div style="flex: 1; min-width: 280px;">
+            <div class="file-label">
+                <span class="ok-badge">存在</span> 干声 (Vocal) 
+            </div>
+            <div class="file-path">d:\code\TraeProjects\1193\test_audio\vocal2.mp3</div>
+        </div>
+        <div class="file-meta">
+            时长: 未知 · 大小: 42 B
+        </div>
+    </li>
+    
+    <li class="file-ok">
+        <div style="flex: 1; min-width: 280px;">
+            <div class="file-label">
+                <span class="ok-badge">存在</span> 伴奏 (Instrumental) 
+            </div>
+            <div class="file-path">d:\code\TraeProjects\1193\test_audio\instrumental2.mp3</div>
+        </div>
+        <div class="file-meta">
+            时长: 未知 · 大小: 42 B
+        </div>
+    </li>
+    
+        <li class="file-missing">
+            <div style="flex:1; min-width:280px;">
+                <div class="file-label"><span class="missing-badge">缺失</span> 混音文件</div>
+                <div class="file-path">暂无混音版本</div>
+            </div>
+        </li>
+        </ul>
+        <div class="section-title">后期处理参数</div>
+        <div class="no-params">暂无后期参数</div>
+        
+    </div>
+    
+    <div class="song-card">
+        <div class="song-header">
+            <div>
+            <div class="song-title">缺失伴奏歌曲</div>
+            <div class="song-original">原唱: 歌手3 · 原曲: 原曲3</div>
+            </div>
+            <div><span class="tag" style="background:#eee; color:#888;">无标签</span></div>
+        </div>
+        <div style="font-size:12px; color:#aaa;">ID: cc5e6573 · 更新于 2026-06-12 03:00:41</div>
+        <div class="section-title">文件清单</div>
+        <ul class="file-list">
+    <li class="file-ok">
+        <div style="flex: 1; min-width: 280px;">
+            <div class="file-label">
+                <span class="ok-badge">存在</span> 干声 (Vocal) 
+            </div>
+            <div class="file-path">d:\code\TraeProjects\1193\test_audio\vocal1.mp3</div>
+        </div>
+        <div class="file-meta">
+            时长: 未知 · 大小: 42 B
+        </div>
+    </li>
+    
+    <li class="file-missing">
+        <div style="flex: 1; min-width: 280px;">
+            <div class="file-label">
+                <span class="missing-badge">缺失</span> 伴奏 (Instrumental) 
+            </div>
+            <div class="file-path">d:\code\TraeProjects\1193\test_audio\nonexistent.mp3</div>
+        </div>
+        <div class="file-meta">
+            时长: 未知 · 大小: 未知
+        </div>
+    </li>
+    
+        <li class="file-missing">
+            <div style="flex:1; min-width:280px;">
+                <div class="file-label"><span class="missing-badge">缺失</span> 混音文件</div>
+                <div class="file-path">暂无混音版本</div>
+            </div>
+        </li>
+        </ul>
+        <div class="section-title">后期处理参数</div>
+        <div class="no-params">暂无后期参数</div>
+        
+    </div>
+    
+    <div class="song-card">
+        <div class="song-header">
+            <div>
+            <div class="song-title">全部缺失歌曲</div>
+            <div class="song-original">原唱: 歌手4 · 原曲: 原曲4</div>
+            </div>
+            <div><span class="tag" style="background:#eee; color:#888;">无标签</span></div>
+        </div>
+        <div style="font-size:12px; color:#aaa;">ID: 70988b80 · 更新于 2026-06-12 03:00:41</div>
+        <div class="section-title">文件清单</div>
+        <ul class="file-list">
+    <li class="file-missing">
+        <div style="flex: 1; min-width: 280px;">
+            <div class="file-label">
+                <span class="missing-badge">缺失</span> 干声 (Vocal) 
+            </div>
+            <div class="file-path">d:\code\TraeProjects\1193\test_audio\no_vocal.mp3</div>
+        </div>
+        <div class="file-meta">
+            时长: 未知 · 大小: 未知
+        </div>
+    </li>
+    
+    <li class="file-missing">
+        <div style="flex: 1; min-width: 280px;">
+            <div class="file-label">
+                <span class="missing-badge">缺失</span> 伴奏 (Instrumental) 
+            </div>
+            <div class="file-path">d:\code\TraeProjects\1193\test_audio\no_inst.mp3</div>
+        </div>
+        <div class="file-meta">
+            时长: 未知 · 大小: 未知
+        </div>
+    </li>
+    
+        <li class="file-missing">
+            <div style="flex:1; min-width:280px;">
+                <div class="file-label"><span class="missing-badge">缺失</span> 混音文件</div>
+                <div class="file-path">暂无混音版本</div>
+            </div>
+        </li>
+        </ul>
+        <div class="section-title">后期处理参数</div>
+        <div class="no-params">暂无后期参数</div>
+        
+    </div>
+    
+        <footer>由 Cover Song Manager 生成</footer>
+    </div>
+</body>
+</html>

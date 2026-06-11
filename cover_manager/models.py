@@ -104,11 +104,17 @@ class CoverPlan:
     @classmethod
     def create(cls, name: str, description: str = "",
                song_ids: Optional[List[str]] = None) -> "CoverPlan":
+        unique_ids = []
+        seen = set()
+        for sid in song_ids or []:
+            if sid not in seen:
+                seen.add(sid)
+                unique_ids.append(sid)
         return cls(
             id=str(uuid.uuid4())[:8],
             name=name,
             description=description,
-            song_ids=song_ids or [],
+            song_ids=unique_ids,
         )
 
     def to_dict(self) -> dict:
@@ -120,6 +126,31 @@ class CoverPlan:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+    def add_song_id(self, song_id: str) -> bool:
+        """添加歌曲ID（自动去重），返回 True 表示新增，False 表示已存在"""
+        if song_id not in self.song_ids:
+            self.song_ids.append(song_id)
+            return True
+        return False
+
+    def remove_song_id(self, song_id: str) -> bool:
+        """移除歌曲ID，返回 True 表示删除成功"""
+        if song_id in self.song_ids:
+            self.song_ids.remove(song_id)
+            return True
+        return False
+
+    def set_song_ids(self, song_ids: List[str]) -> int:
+        """设置歌曲ID列表（自动去重），返回最终数量"""
+        unique_ids = []
+        seen = set()
+        for sid in song_ids:
+            if sid not in seen:
+                seen.add(sid)
+                unique_ids.append(sid)
+        self.song_ids = unique_ids
+        return len(unique_ids)
 
     @classmethod
     def from_dict(cls, data: dict) -> "CoverPlan":
