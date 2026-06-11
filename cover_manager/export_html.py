@@ -1,202 +1,363 @@
 """HTML 导出功能"""
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Dict, Any, Optional
+import os
 
 from .models import SongProject, CoverPlan
-from .audio_utils import format_duration, format_file_size
+from .audio_utils import (
+    format_duration, format_file_size, collect_song_audio_stats,
+)
 
-
-HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: #f5f5f5;
-            color: #333;
-            padding: 20px;
-        }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
-        header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-        }}
-        header h1 {{ font-size: 28px; margin-bottom: 8px; }}
-        header .subtitle {{ opacity: 0.9; font-size: 14px; }}
-        .stats-bar {{
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }}
-        .stat-card {{
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            flex: 1;
-            min-width: 180px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-        }}
-        .stat-card .label {{ font-size: 13px; color: #888; margin-bottom: 6px; }}
-        .stat-card .value {{ font-size: 24px; font-weight: 600; color: #333; }}
-        .songs-table {{
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-        }}
-        table {{ width: 100%; border-collapse: collapse; }}
-        th {{
-            background: #f8f9fa;
-            text-align: left;
-            padding: 14px 16px;
-            font-weight: 600;
-            font-size: 13px;
-            color: #555;
-            border-bottom: 1px solid #eee;
-        }}
-        td {{
-            padding: 14px 16px;
-            border-bottom: 1px solid #f0f0f0;
-            font-size: 14px;
-        }}
-        tr:last-child td {{ border-bottom: none; }}
-        tr:hover {{ background: #fafafa; }}
-        .tag {{
-            display: inline-block;
-            padding: 3px 10px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
-            margin-right: 4px;
-        }}
-        .tag-done {{ background: #d4edda; color: #155724; }}
-        .tag-mixing {{ background: #fff3cd; color: #856404; }}
-        .tag-tuning {{ background: #f8d7da; color: #721c24; }}
-        .song-title {{ font-weight: 600; color: #222; }}
-        .original-info {{ color: #888; font-size: 12px; margin-top: 2px; }}
-        .file-path {{
-            font-family: monospace;
-            font-size: 12px;
-            color: #666;
-            background: #f5f5f5;
-            padding: 2px 6px;
-            border-radius: 4px;
-        }}
-        .mix-count {{
-            display: inline-block;
-            background: #e7f3ff;
-            color: #0066cc;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 12px;
-            font-weight: 500;
-        }}
-        footer {{
-            text-align: center;
-            color: #999;
-            font-size: 12px;
-            margin-top: 20px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>{title}</h1>
-            <p class="subtitle">生成时间：{generated_at}</p>
-            {subtitle_extra}
-        </header>
-
-        <div class="stats-bar">
-            <div class="stat-card">
-                <div class="label">歌曲数量</div>
-                <div class="value">{total_songs} 首</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">总时长</div>
-                <div class="value">{total_duration}</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">总大小</div>
-                <div class="value">{total_size}</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">混音版本总数</div>
-                <div class="value">{total_mixes} 个</div>
-            </div>
-        </div>
-
-        <div class="songs-table">
-            <table>
-                <thead>
-                    <tr>
-                        <th>歌曲</th>
-                        <th>标签</th>
-                        <th>时长</th>
-                        <th>文件大小</th>
-                        <th>混音版本</th>
-                        <th>干声</th>
-                        <th>伴奏</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows}
-                </tbody>
-            </table>
-        </div>
-
-        <footer>
-            由 Cover Song Manager 生成
-        </footer>
-    </div>
-</body>
-</html>
+BASE_CSS = """
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background: #f5f5f5;
+        color: #333;
+        padding: 20px;
+        line-height: 1.5;
+    }
+    .container { max-width: 1280px; margin: 0 auto; }
+    header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 12px;
+        margin-bottom: 20px;
+    }
+    header h1 { font-size: 28px; margin-bottom: 8px; }
+    header .subtitle, header .meta { opacity: 0.9; font-size: 14px; margin-top: 6px; }
+    .stats-bar {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+    .stat-card {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        flex: 1;
+        min-width: 160px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .stat-card .label { font-size: 13px; color: #888; margin-bottom: 6px; }
+    .stat-card .value { font-size: 24px; font-weight: 600; color: #333; }
+    .stat-card.warn .value { color: #e67e22; }
+    .stat-card.good .value { color: #27ae60; }
+    .song-card {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .song-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 16px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    .song-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #222;
+    }
+    .song-original {
+        color: #888;
+        font-size: 13px;
+        margin-top: 4px;
+    }
+    .tag {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 500;
+        margin-right: 4px;
+        margin-bottom: 4px;
+    }
+    .tag-done { background: #d4edda; color: #155724; }
+    .tag-mixing { background: #fff3cd; color: #856404; }
+    .tag-tuning { background: #f8d7da; color: #721c24; }
+    .section-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #555;
+        margin: 14px 0 8px;
+        padding-left: 8px;
+        border-left: 3px solid #667eea;
+    }
+    .file-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+    .file-list li {
+        padding: 10px 12px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 8px;
+        background: #fafafa;
+    }
+    .file-list li.file-ok { border-left: 3px solid #27ae60; }
+    .file-list li.file-missing { border-left: 3px solid #e74c3c; background: #fff5f5; }
+    .file-meta {
+        font-family: monospace;
+        font-size: 12px;
+        color: #555;
+    }
+    .file-label {
+        font-weight: 600;
+        font-size: 13px;
+        margin-bottom: 2px;
+    }
+    .file-path {
+        font-family: monospace;
+        font-size: 12px;
+        color: #444;
+        word-break: break-all;
+    }
+    .missing-badge {
+        background: #e74c3c;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+    .ok-badge {
+        background: #27ae60;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+    .params-table {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 8px;
+    }
+    .param-item {
+        background: #f8f9fa;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        border: 1px solid #eee;
+    }
+    .param-key { color: #888; font-size: 11px; }
+    .param-value { font-weight: 600; }
+    .no-params { color: #aaa; font-size: 13px; padding: 8px; }
+    .song-notes {
+        background: #fffbe6;
+        padding: 10px 14px;
+        border-left: 3px solid #f0c36d;
+        border-radius: 4px;
+        color: #7a5c00;
+        font-size: 13px;
+    }
+    footer {
+        text-align: center;
+        color: #999;
+        font-size: 12px;
+        margin-top: 20px;
+        padding: 12px;
+    }
+    .plan-summary {
+        background: white;
+        padding: 16px 20px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+</style>
 """
 
 
 def _tag_class(tag: str) -> str:
-    """获取标签对应的 CSS 类"""
-    tag_map = {
-        "已完成": "tag-done",
-        "混音中": "tag-mixing",
-        "待修音": "tag-tuning",
-    }
+    tag_map = {"已完成": "tag-done", "混音中": "tag-mixing", "待修音": "tag-tuning"}
     return tag_map.get(tag, "")
 
 
-def _generate_row(song: SongProject) -> str:
-    """生成表格行 HTML"""
-    tags_html = "".join(
-        f'<span class="tag {_tag_class(t)}">{t}</span>'
-        for t in song.tags
+def _render_status_badge(exists: bool) -> str:
+    return '<span class="ok-badge">存在</span>' if exists else '<span class="missing-badge">缺失</span>'
+
+
+def _render_file_item(label: str, file_info: Dict[str, Any], extra_label: str = "") -> str:
+    """渲染单个文件条目"""
+    exists = file_info.get("exists", False)
+    path = file_info.get("path", "") or "（未设置）"
+    duration = file_info.get("duration", 0.0)
+    size = file_info.get("size", 0)
+
+    duration_str = format_duration(duration) if duration > 0 else "未知"
+    size_str = format_file_size(size) if size > 0 else "未知"
+
+    cls = "file-ok" if exists else "file-missing"
+
+    extra_html = f" <span style='color:#888'>{extra_label}</span>" if extra_label else ""
+
+    return f"""
+    <li class="{cls}">
+        <div style="flex: 1; min-width: 280px;">
+            <div class="file-label">
+                {_render_status_badge(exists)} {label} {extra_html}
+            </div>
+            <div class="file-path">{path}</div>
+        </div>
+        <div class="file-meta">
+            时长: {duration_str} · 大小: {size_str}
+        </div>
+    </li>
+    """
+
+
+def _render_params(post_processing_params: Dict[str, Any]) -> str:
+    """渲染后期参数块"""
+    if not post_processing_params:
+        return '<div class="no-params">暂无后期参数</div>'
+
+    items = []
+    for k, v in post_processing_params.items():
+        items.append(f"""
+        <div class="param-item">
+            <div class="param-key">{k}</div>
+            <div class="param-value">{v}</div>
+        </div>
+        """)
+    return f'<div class="params-table">{"".join(items)}</div>'
+
+
+def _render_song_card(song: SongProject, show_plan_context: bool = False) -> Dict[str, Any]:
+    """
+    渲染歌曲卡片 HTML
+
+    返回 (html_string, stats_dict)
+    """
+    tags_html = "".join(f'<span class="tag {_tag_class(t)}">{t}</span>' for t in song.tags)
+    if not tags_html:
+        tags_html = '<span class="tag" style="background:#eee; color:#888;">无标签</span>'
+
+    # 实时计算音频统计
+    stats = collect_song_audio_stats(
+        vocal_path=song.vocal_path,
+        instrumental_path=song.instrumental_path,
+        mix_versions=song.mix_versions,
     )
 
-    vocal_status = '<span class="file-path">已配置</span>' if song.vocal_path else '<span style="color:#dc3545;">缺失</span>'
-    inst_status = '<span class="file-path">已配置</span>' if song.instrumental_path else '<span style="color:#dc3545;">缺失</span>'
+    # 文件列表
+    files_html = '<ul class="file-list">'
 
-    duration_str = format_duration(song.duration) if song.duration > 0 else "未知"
-    size_str = format_file_size(song.file_size) if song.file_size > 0 else "未知"
+    files_html += _render_file_item("干声 (Vocal)", stats["vocal"])
+    files_html += _render_file_item("伴奏 (Instrumental)", stats["instrumental"])
 
-    return f"""<tr>
-        <td>
+    # 混音版本
+    if stats["mixes"]:
+        for mv_info in stats["mixes"]:
+            mv_obj = None
+            for m in song.mix_versions:
+                if m.version == mv_info["version"]:
+                    mv_obj = m
+                    break
+            version_extra = ""
+            if mv_obj:
+                version_extra = (
+                    f"干声+{mv_obj.dry_gain}dB / 伴奏+{mv_obj.instrumental_gain}dB"
+                )
+                if mv_obj.notes:
+                    version_extra += f" · {mv_obj.notes}"
+            files_html += _render_file_item(
+                f"混音 v{mv_info['version']:03d}",
+                mv_info,
+                extra_label=version_extra,
+            )
+    else:
+        files_html += """
+        <li class="file-missing">
+            <div style="flex:1; min-width:280px;">
+                <div class="file-label"><span class="missing-badge">缺失</span> 混音文件</div>
+                <div class="file-path">暂无混音版本</div>
+            </div>
+        </li>
+        """
+
+    files_html += "</ul>"
+
+    # 后期参数
+    params_html = _render_params(song.post_processing_params)
+
+    # 备注
+    notes_html = ""
+    if song.notes:
+        notes_html = f'<div class="song-notes" style="margin-top:12px;">📝 {song.notes}</div>'
+
+    card = f"""
+    <div class="song-card">
+        <div class="song-header">
+            <div>
             <div class="song-title">{song.title}</div>
-            <div class="original-info">原唱：{song.original_artist} · 原曲：{song.original_song}</div>
-        </td>
-        <td>{tags_html}</td>
-        <td>{duration_str}</td>
-        <td>{size_str}</td>
-        <td><span class="mix-count">{len(song.mix_versions)} 个</span></td>
-        <td>{vocal_status}</td>
-        <td>{inst_status}</td>
-    </tr>"""
+            <div class="song-original">原唱: {song.original_artist} · 原曲: {song.original_song}</div>
+            </div>
+            <div>{tags_html}</div>
+        </div>
+        <div style="font-size:12px; color:#aaa;">ID: {song.id} · 更新于 {song.updated_at[:19].replace('T', ' ')}</div>
+        <div class="section-title">文件清单</div>
+        {files_html}
+        <div class="section-title">后期处理参数</div>
+        {params_html}
+        {notes_html}
+    </div>
+    """
+
+    return {"html": card, "stats": stats}
+
+
+def _compute_global_stats(songs: List[SongProject]) -> Dict[str, Any]:
+    """计算所有歌曲的全局统计"""
+    total_duration = 0.0
+    total_size = 0
+    total_mixes = 0
+    missing_files = 0
+    total_files = 0
+    per_song_stats = []
+
+    for s in songs:
+        s_stats = collect_song_audio_stats(
+            vocal_path=s.vocal_path,
+            instrumental_path=s.instrumental_path,
+            mix_versions=s.mix_versions,
+        )
+        per_song_stats.append(s_stats)
+        total_duration += s_stats["total_duration"]
+        total_size += s_stats["total_size"]
+        total_mixes += len(s.mix_versions)
+        for key in ("vocal", "instrumental"):
+            total_files += 1
+            if not s_stats[key]["exists"]:
+                missing_files += 1
+        for mv in s_stats["mixes"]:
+            total_files += 1
+            if not mv["exists"]:
+                missing_files += 1
+
+    return {
+        "total_songs": len(songs),
+        "total_duration": total_duration,
+        "total_size": total_size,
+        "total_mixes": total_mixes,
+        "total_files": total_files,
+        "missing_files": missing_files,
+    }
 
 
 def export_songs_html(
@@ -205,39 +366,65 @@ def export_songs_html(
     title: str = "翻唱歌曲项目清单",
     subtitle_extra: str = "",
 ) -> str:
-    """
-    导出歌曲列表为 HTML
+    """导出歌曲列表为 HTML"""
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    global_stats = _compute_global_stats(songs)
 
-    Args:
-        songs: 歌曲列表
-        output_path: 输出文件路径
-        title: 页面标题
-        subtitle_extra: 额外的副标题内容
+    # 渲染每首歌
+    cards_html = ""
+    for s in songs:
+        render_result = _render_song_card(s)
+        cards_html += render_result["html"]
 
-    Returns:
-        输出文件路径
-    """
-    total_songs = len(songs)
-    total_duration = sum(s.duration for s in songs)
-    total_size = sum(s.file_size for s in songs)
-    total_mixes = sum(len(s.mix_versions) for s in songs)
+    subtitle_html = f'<p class="subtitle">{subtitle_extra}</p>' if subtitle_extra else ""
+    missing_cls_1 = "warn" if global_stats["missing_files"] > 0 else "good"
 
-    rows = "\n".join(_generate_row(s) for s in songs)
-
-    html = HTML_TEMPLATE.format(
-        title=title,
-        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        subtitle_extra=subtitle_extra,
-        total_songs=total_songs,
-        total_duration=format_duration(total_duration),
-        total_size=format_file_size(total_size),
-        total_mixes=total_mixes,
-        rows=rows,
-    )
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    {BASE_CSS}
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>{title}</h1>
+            <p class="subtitle">生成时间：{generated_at}</p>
+            {subtitle_html}
+        </header>
+        <div class="stats-bar">
+            <div class="stat-card good">
+                <div class="label">歌曲数量</div>
+                <div class="value">{global_stats["total_songs"]} 首</div>
+            </div>
+            <div class="stat-card good">
+                <div class="label">总时长（所有素材合计）</div>
+                <div class="value">{format_duration(global_stats["total_duration"])}</div>
+            </div>
+            <div class="stat-card good">
+                <div class="label">总占用空间</div>
+                <div class="value">{format_file_size(global_stats["total_size"])}</div>
+            </div>
+            <div class="stat-card good">
+                <div class="label">混音版本总数</div>
+                <div class="value">{global_stats["total_mixes"]} 个</div>
+            </div>
+            <div class="stat-card {missing_cls_1}">
+                <div class="label">缺失文件</div>
+                <div class="value">{global_stats["missing_files"]} 个</div>
+            </div>
+        </div>
+        {cards_html if cards_html else '<div style="background:white; padding:40px; border-radius:8px; text-align:center; color:#888;">暂无歌曲项目</div>'}
+        <footer>由 Cover Song Manager 生成</footer>
+    </div>
+</body>
+</html>
+"""
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
-
     return output_path
 
 
@@ -247,16 +434,78 @@ def export_plan_html(
     output_path: str,
 ) -> str:
     """
-    导出翻唱计划为 HTML
+    导出翻唱计划为 HTML（增强版：列出所有相关文件路径、大小、缺失状态）"""
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    global_stats = _compute_global_stats(songs)
 
-    Args:
-        plan: 翻唱计划
-        songs: 计划中的歌曲列表
-        output_path: 输出文件路径
+    # 渲染每首歌
+    cards_html = ""
+    for s in songs:
+        render_result = _render_song_card(s, show_plan_context=True)
+        cards_html += render_result["html"]
 
-    Returns:
-        输出文件路径
+    desc_html = f'<p class="meta">📋 {plan.description}</p>' if plan.description else ""
+    missing_cls_2 = "warn" if global_stats["missing_files"] > 0 else "good"
+    missing_color = "#e74c3c" if global_stats["missing_files"] > 0 else "#27ae60"
+
+    # 计划的整体素材汇总
+    plan_summary = f"""
+    <div class="plan-summary">
+        <div style="font-weight:600; font-size:15px; margin-bottom:10px;">📂 素材整理清单 (ID: {plan.id})</div>
+        <div style="font-size:13px; color:#666; line-height:1.8;">
+            歌曲数: {len(songs)} 首 &nbsp;|&nbsp;
+            总时长: {format_duration(global_stats["total_duration"])} &nbsp;|&nbsp;
+            总大小: {format_file_size(global_stats["total_size"])} &nbsp;|&nbsp;
+            缺失文件: <strong style="color:{missing_color};">{global_stats["missing_files"]} 个</strong>
+        </div>
+    </div>
     """
-    subtitle = f"<p class='subtitle'>{plan.description}</p>" if plan.description else ""
-    title = f"翻唱计划：{plan.name}"
-    return export_songs_html(songs, output_path, title=title, subtitle_extra=subtitle)
+
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>翻唱计划：{plan.name}</title>
+    {BASE_CSS}
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎵 翻唱计划：{plan.name}</h1>
+            <p class="subtitle">生成时间：{generated_at}</p>
+            {desc_html}
+        </header>
+        {plan_summary}
+        <div class="stats-bar">
+            <div class="stat-card good">
+                <div class="label">歌曲数量</div>
+                <div class="value">{global_stats["total_songs"]} 首</div>
+            </div>
+            <div class="stat-card good">
+                <div class="label">总时长</div>
+                <div class="value">{format_duration(global_stats["total_duration"])}</div>
+            </div>
+            <div class="stat-card good">
+                <div class="label">总占用空间</div>
+                <div class="value">{format_file_size(global_stats["total_size"])}</div>
+            </div>
+            <div class="stat-card good">
+                <div class="label">混音版本总数</div>
+                <div class="value">{global_stats["total_mixes"]} 个</div>
+            </div>
+            <div class="stat-card {missing_cls_2}">
+                <div class="label">缺失文件</div>
+                <div class="value">{global_stats["missing_files"]} 个</div>
+            </div>
+        </div>
+        {cards_html if cards_html else '<div style="background:white; padding:40px; border-radius:8px; text-align:center; color:#888;">暂无歌曲项目</div>'}
+        <footer>由 Cover Song Manager 生成</footer>
+    </div>
+</body>
+</html>
+"""
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    return output_path

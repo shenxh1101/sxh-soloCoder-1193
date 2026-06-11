@@ -5,12 +5,11 @@ import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
 
 class FFmpegError(Exception):
-    """FFmpeg 相关错误
-    """
+    """FFmpeg 相关错误"""
     pass
 
 
@@ -21,11 +20,15 @@ def check_ffmpeg() -> bool:
 
 def get_audio_info(file_path: str) -> Tuple[float, int]:
     """
-    获取音频文件信息（时长和文件大小
-    返回 (duration_seconds, file_size_bytes)
+    获取音频文件信息（时长和文件大小）
+    返回 (duration_seconds, file_size_bytes)，
+    如果文件不存在返回 (0.0, 0)
     """
+    if not file_path:
+        return 0.0, 0
+
     if not os.path.exists(file_path):
-        raise FileNotFoundError(f"文件不存在: {file_path}")
+        return 0.0, 0
 
     file_size = os.path.getsize(file_path)
 
@@ -60,25 +63,29 @@ def mix_audio(
     sample_rate: int = 44100,
 ) -> str:
     """
-    使用 ffmpeg 混音（干声 + 伴奏
+    使用 ffmpeg 混音（干声 + 伴奏）
+    始终正确处理增益，无论增益是否为 0。
     返回输出文件路径
     """
     if not shutil.which("ffmpeg"):
         raise FFmpegError("未找到 ffmpeg，请先安装 ffmpeg 并添加到 PATH")
 
-    if not os.path.exists(vocal_path):
+    if not vocal_path or not os.path.exists(vocal_path):
         raise FileNotFoundError(f"干声文件不存在: {vocal_path}")
 
-    if not os.path.exists(instrumental_path):
+    if not instrumental_path or not os.path.exists(instrumental_path):
         raise FileNotFoundError(f"伴奏文件不存在: {instrumental_path}")
 
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    vocal_filter = f"[0:a]volume={vocal_gain}dB[a]" if vocal_gain != 0 else "[0:a]"
-    instrumental_filter = f"[1:a]volume={instrumental_gain}dB[b]" if instrumental_gain != 0 else "[1:a]"
-    filter_complex = f"{vocal_filter};{instrumental_filter};[a][b]amix=inputs=2:duration=longest"
+    # 始终使用 volume 过滤器（0dB 等于直通），保证 filter 标签一致性
+    filter_complex = (
+        f"[0:a]volume={vocal_gain}dB[a];"
+        f"[1:a]volume={instrumental_gain}dB[b];"
+        f"[a][b]amix=inputs=2:duration=longest:normalize=0"
+    )
 
     cmd = [
         "ffmpeg",
@@ -97,7 +104,7 @@ def mix_audio(
             raise FFmpegError(f"混音失败: {result.stderr}")
         return output_path
     except FileNotFoundError:
-            raise FFmpegError("ffmpeg 命令执行失败，请确认 ffmpeg 已正确安装")
+        raise FFmpegError("ffmpeg 命令执行失败，请确认 ffmpeg 已正确安装")
 
 
 def generate_output_path(song_title: str, version: int, output_dir: str = "") -> str:
@@ -135,3 +142,84 @@ def format_file_size(size_bytes: int) -> str:
         return f"{size_bytes / (1024 * 1024):.1f} MB"
     else:
         return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+
+def collect_song_audio_stats(
+    vocal_path: str = "",
+    instrumental_path: str = "",
+    mix_versions: Optional[list] = None,
+) -> Dict[str, Any]:
+    """
+    实时汇总歌曲的所有音频文件信息：
+    - 每类文件是否存在、路径、时长、大小
+    - 总时长（取存在的音频中最长的一个作为歌曲时长）
+    - 总占用空间（所有存在的文件大小相加）
+
+    返回示例：
+    {
+        "vocal": {"path": "...", "exists": True, "duration": 213.5, "size": 45235234},
+        "instrumental": {"path": "...", "exists": True, ...},
+        "mixes": [
+            {"version": 1, "path": "...", "exists": True, ...}, ...
+        ],
+        "total_duration": 213.5,
+        "total_size": 123456789,
+    }
+    """
+    mix_versions = mix_versions or []
+
+    result: Dict[str, Any] = {
+        "vocal": {},
+        "instrumental": {},
+        "mixes": [],
+        "total_duration": 0.0,
+        "total_size": 0,
+    }
+
+    durations: list[float] = []
+
+    # 干声
+    vocal_dur, vocal_size = get_audio_info(vocal_path)
+    vocal_exists = bool(vocal_path) and os.path.exists(vocal_path)
+    result["vocal"] = {
+        "path": vocal_path,
+        "exists": vocal_exists,
+        "duration": vocal_dur,
+        "size": vocal_size,
+    }
+    if vocal_exists:
+        durations.append(vocal_dur)
+        result["total_size"] += vocal_size
+
+    # 伴奏
+    inst_dur, inst_size = get_audio_info(instrumental_path)
+    inst_exists = bool(instrumental_path) and os.path.exists(instrumental_path)
+    result["instrumental"] = {
+        "path": instrumental_path,
+        "exists": inst_exists,
+        "duration": inst_dur,
+        "size": inst_size,
+    }
+    if inst_exists:
+        durations.append(inst_dur)
+        result["total_size"] += inst_size
+
+    # 混音版本
+    for mv in mix_versions:
+        mv_path = getattr(mv, "output_path", "") if not isinstance(mv, dict) else mv.get("output_path", "")
+        mv_version = getattr(mv, "version", 0) if not isinstance(mv, dict) else mv.get("version", 0)
+        mv_dur, mv_size = get_audio_info(mv_path)
+        mv_exists = bool(mv_path) and os.path.exists(mv_path)
+        result["mixes"].append({
+            "version": mv_version,
+            "path": mv_path,
+            "exists": mv_exists,
+            "duration": mv_dur,
+            "size": mv_size,
+        })
+        if mv_exists:
+            durations.append(mv_dur)
+            result["total_size"] += mv_size
+
+    result["total_duration"] = max(durations) if durations else 0.0
+    return result
