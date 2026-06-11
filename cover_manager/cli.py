@@ -30,6 +30,7 @@ from .audio_utils import (
     collect_song_audio_stats,
 )
 from .export_html import export_songs_html, export_plan_html
+from .checklist import generate_check_package
 
 
 def get_store() -> DataStore:
@@ -249,12 +250,15 @@ def song_delete(song_id, yes):
 @click.option("--output-dir", "-o", required=True, help="目标收集目录")
 @click.option("--copy-mixes/--no-copy-mixes", default=True, help="是否同时复制混音文件，默认是")
 @click.option("--yes", is_flag=True, help="跳过确认")
-def song_collect(song_id, output_dir, copy_mixes, yes):
+@click.option("--dry-run", is_flag=True, help="预览模式：只显示将要复制的文件，不实际复制")
+@click.option("--zip", "zip_output", is_flag=True, help="打包为 zip 文件")
+def song_collect(song_id, output_dir, copy_mixes, yes, dry_run, zip_output):
     """
     收集单首歌曲的素材到指定目录
 
     按歌曲名创建子文件夹，复制干声、伴奏、混音文件，并生成整理清单
     """
+    import shutil
     store = get_store()
     song = store.get_song(song_id)
     if not song:
@@ -267,11 +271,22 @@ def song_collect(song_id, output_dir, copy_mixes, yes):
     safe_name = safe_name or f"song_{song.id}"
     song_dir = os.path.join(output_dir, f"{safe_name}_{song.id}")
 
+    zip_path = None
+    if zip_output:
+        zip_path = song_dir + ".zip"
+
     stats = collect_song_audio_stats(song.vocal_path, song.instrumental_path, song.mix_versions)
 
     # 显示将复制的内容
-    click.echo(f"即将收集歌曲「{song.title}」的素材：")
-    click.echo(f"  目标目录: {song_dir}")
+    mode_label = "[DRY-RUN] 预览" if dry_run else "即将收集"
+    if zip_output and not dry_run:
+        mode_label = "即将打包"
+    click.echo(f"{mode_label}歌曲「{song.title}」的素材：")
+    if zip_output:
+        click.echo(f"  目标文件: {zip_path}")
+    else:
+        click.echo(f"  目标目录: {song_dir}")
+
     files_to_copy = []
     if stats["vocal"]["exists"]:
         files_to_copy.append(("干声", stats["vocal"]["path"]))
@@ -289,9 +304,11 @@ def song_collect(song_id, output_dir, copy_mixes, yes):
         missing_files.append(f"伴奏: {song.instrumental_path}")
 
     click.echo(f"  将复制 {len(files_to_copy)} 个文件：")
+    total_size = 0
     for label, src in files_to_copy:
-        size = format_file_size(os.path.getsize(src))
-        click.echo(f"    - {label}: {os.path.basename(src)} ({size})")
+        size = os.path.getsize(src)
+        total_size += size
+        click.echo(f"    - {label}: {os.path.basename(src)} ({format_file_size(size)})")
 
     if missing_files:
         click.echo(f"\n  {E_WARN}  缺失 {len(missing_files)} 个文件（不会复制）：")
@@ -302,25 +319,39 @@ def song_collect(song_id, output_dir, copy_mixes, yes):
         click.echo(f"\n{E_ERR} 没有可复制的文件", err=True)
         sys.exit(1)
 
-    if not yes:
-        click.confirm(f"\n确定要复制到 {song_dir} 吗？", abort=True)
+    click.echo(f"\n  合计: {len(files_to_copy)} 个文件, {format_file_size(total_size)}")
 
-    os.makedirs(song_dir, exist_ok=True)
+    if dry_run:
+        click.echo(f"\n{SYM_STATS} 预览模式，未执行实际操作")
+        return
+
+    if not yes:
+        target_desc = zip_path if zip_output else song_dir
+        click.confirm(f"\n确定要复制到 {target_desc} 吗？", abort=True)
+
+    # 如果是 zip 模式，创建临时目录然后打包
+    work_dir = song_dir
+    temp_dir = None
+    if zip_output:
+        import tempfile
+        temp_dir = tempfile.mkdtemp(prefix="cover_collect_")
+        work_dir = os.path.join(temp_dir, f"{safe_name}_{song.id}")
+
+    os.makedirs(work_dir, exist_ok=True)
 
     # 复制文件
     copied = []
     for label, src in files_to_copy:
-        dst = os.path.join(song_dir, os.path.basename(src))
+        dst = os.path.join(work_dir, os.path.basename(src))
         if os.path.abspath(src) == os.path.abspath(dst):
             copied.append((label, src, dst, "跳过（源和目标相同）"))
             continue
-        import shutil
         shutil.copy2(src, dst)
         size = format_file_size(os.path.getsize(dst))
         copied.append((label, src, dst, size))
 
     # 生成整理清单
-    manifest_path = os.path.join(song_dir, "MANIFEST.md")
+    manifest_path = os.path.join(work_dir, "MANIFEST.md")
     with open(manifest_path, "w", encoding="utf-8") as f:
         f.write(f"# {song.title} - 素材整理清单\n\n")
         f.write(f"- **原唱**: {song.original_artist}\n")
@@ -344,11 +375,33 @@ def song_collect(song_id, output_dir, copy_mixes, yes):
         if song.notes:
             f.write(f"\n## 备注\n\n{song.notes}\n")
 
-    total_size = sum(os.path.getsize(dst) for _, _, dst, _ in copied if os.path.exists(dst))
+    total_size_val = sum(os.path.getsize(dst) for _, _, dst, _ in copied if os.path.exists(dst))
+    
+    # 如果是 zip 模式，打包并清理临时目录
+    final_output = song_dir
+    if zip_output:
+        import zipfile
+        os.makedirs(os.path.dirname(zip_path), exist_ok=True)
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for label, src, dst, size in copied:
+                arcname = os.path.relpath(dst, temp_dir)
+                zf.write(dst, arcname)
+            zf.write(manifest_path, os.path.relpath(manifest_path, temp_dir))
+        final_output = zip_path
+        # 清理临时目录
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception:
+            pass
+
     click.echo(f"\n{E_OK} 收集完成！")
-    click.echo(f"   目录: {song_dir}")
-    click.echo(f"   复制了 {len(copied)} 个文件，总计 {format_file_size(total_size)}")
-    click.echo(f"   整理清单: {manifest_path}")
+    if zip_output:
+        click.echo(f"   压缩包: {zip_path}")
+        click.echo(f"   压缩包大小: {format_file_size(os.path.getsize(zip_path))}")
+    else:
+        click.echo(f"   目录: {song_dir}")
+    click.echo(f"   复制了 {len(copied)} 个文件，总计 {format_file_size(total_size_val)}")
+    click.echo(f"   整理清单: MANIFEST.md")
 
 
 # ============ 后期参数管理 ============
@@ -821,22 +874,7 @@ def export_cmd(output, tag, title, missing_only, exists_only):
     elif exists_only:
         filter_type = "exists"
 
-    export_songs_html(songs, output, title=title, filter_type=filter_type)
-
-    global_size = 0
-    global_dur = 0.0
-    missing = 0
-    for s in songs:
-        st = collect_song_audio_stats(s.vocal_path, s.instrumental_path, s.mix_versions)
-        global_dur += st["total_duration"]
-        global_size += st["total_size"]
-        if not st["vocal"]["exists"]:
-            missing += 1
-        if not st["instrumental"]["exists"]:
-            missing += 1
-        for m in st["mixes"]:
-            if not m["exists"]:
-                missing += 1
+    result = export_songs_html(songs, output, title=title, filter_type=filter_type)
 
     filter_msg = ""
     if filter_type == "missing":
@@ -845,8 +883,12 @@ def export_cmd(output, tag, title, missing_only, exists_only):
         filter_msg = "（仅含已存在文件的歌曲）"
 
     click.echo(f"{E_OK} 已导出到：{output} {filter_msg}")
-    click.echo(f"   歌曲: {len(songs)} 首, 总时长: {format_duration(global_dur)}, "
-               f"总大小: {format_file_size(global_size)}, 缺失文件: {missing} 个")
+    click.echo(f"   筛选后歌曲: {result['total_songs']} 首, 总时长: {format_duration(result['total_duration'])}, "
+               f"总大小: {format_file_size(result['total_size'])}, 文件项: {result['total_files']} 个")
+    if filter_type == "missing":
+        click.echo(f"   缺失文件: {result['missing_files']} 个 {E_WARN}")
+    elif filter_type == "exists":
+        click.echo(f"   存在文件: {result['total_files'] - result['missing_files']} 个 {E_OK}")
 
 
 # ============ 翻唱计划 ============
@@ -1006,8 +1048,15 @@ def plan_status(plan_id):
 
     plan_obj.set_song_ids(plan_obj.song_ids)
 
+    # 统计失效引用
+    invalid_ids = [sid for sid in plan_obj.song_ids if not store.get_song(sid)]
+    valid_count = len(plan_obj.song_ids) - len(invalid_ids)
+
     click.echo(f"\n{SYM_MIC}  计划「{plan_obj.name}」素材准备状态")
     click.echo("=" * 60)
+    if invalid_ids:
+        click.echo(f"  {E_WARN}  有 {len(invalid_ids)} 首歌曲引用已失效，使用 'plan clean' 可清理")
+        click.echo("")
 
     ready_count = 0
     partial_count = 0
@@ -1046,11 +1095,13 @@ def plan_status(plan_id):
 
     click.echo("\n" + "=" * 60)
     click.echo(f"{E_OK} 齐备: {ready_count}  |  {E_WARN}  部分: {partial_count}  |  {E_ERR} 未准备: {not_ready_count}")
-    total = len([s for s in plan_obj.song_ids if store.get_song(s)])
+    total = valid_count
     if total > 0 and ready_count == total:
         click.echo(f"{SYM_CELEB} 全部素材已准备完成！")
     else:
         click.echo(f"{SYM_STATS} 还差 {total - ready_count} 首歌素材完全齐备")
+    if invalid_ids:
+        click.echo(f"{E_WARN}  失效引用: {len(invalid_ids)} 首（使用 'plan clean' 清理）")
 
 
 @plan.command("add-song")
@@ -1074,7 +1125,7 @@ def plan_add_song(plan_id, song_id):
         store.update_plan(plan_obj)
         click.echo(f"{E_OK} 已向计划「{plan_obj.name}」添加歌曲：{song.title}")
     else:
-        click.echo(f"ℹ️  歌曲「{song.title}」已在计划中，跳过重复添加")
+        click.echo(f"{SYM_STATS} 歌曲「{song.title}」已在计划中，跳过重复添加")
 
 
 @plan.command("remove-song")
@@ -1096,6 +1147,47 @@ def plan_remove_song(plan_id, song_id):
         click.echo(f"{E_OK} 已从计划「{plan_obj.name}」移除歌曲：{name}")
     else:
         click.echo("该歌曲不在计划中")
+
+
+@plan.command("clean")
+@click.argument("plan_id")
+@click.option("--yes", is_flag=True, help="跳过确认")
+def plan_clean(plan_id, yes):
+    """清理计划中已失效的歌曲引用（歌曲已删除的）"""
+    store = get_store()
+    plan_obj = store.get_plan(plan_id)
+    if not plan_obj:
+        click.echo(f"{E_ERR} 未找到计划 ID: {plan_id}", err=True)
+        sys.exit(1)
+
+    # 先去重
+    plan_obj.set_song_ids(plan_obj.song_ids)
+
+    # 找出失效引用
+    invalid_ids = []
+    valid_ids = []
+    for sid in plan_obj.song_ids:
+        if store.get_song(sid):
+            valid_ids.append(sid)
+        else:
+            invalid_ids.append(sid)
+
+    if not invalid_ids:
+        click.echo(f"{E_OK} 计划「{plan_obj.name}」没有失效引用")
+        return
+
+    click.echo(f"计划「{plan_obj.name}」中有 {len(invalid_ids)} 个失效引用：")
+    for sid in invalid_ids:
+        click.echo(f"  - {sid}")
+
+    if not yes:
+        click.confirm(f"\n确定要清理这些失效引用吗？", abort=True)
+
+    plan_obj.song_ids = valid_ids
+    store.update_plan(plan_obj)
+
+    click.echo(f"{E_OK} 已清理 {len(invalid_ids)} 个失效引用")
+    click.echo(f"   清理后歌曲数: {len(valid_ids)} 首")
 
 
 @plan.command("delete")
@@ -1162,23 +1254,7 @@ def plan_export(plan_id, output, missing_only, exists_only):
         sys.exit(1)
 
     output_path = output or f"plan_{plan_obj.id}_report.html"
-    export_plan_html(plan_obj, songs, output_path, filter_type=filter_type)
-
-    # 汇总输出
-    global_dur = 0.0
-    global_size = 0
-    missing = 0
-    for s in songs:
-        st = collect_song_audio_stats(s.vocal_path, s.instrumental_path, s.mix_versions)
-        global_dur += st["total_duration"]
-        global_size += st["total_size"]
-        if not st["vocal"]["exists"]:
-            missing += 1
-        if not st["instrumental"]["exists"]:
-            missing += 1
-        for m in st["mixes"]:
-            if not m["exists"]:
-                missing += 1
+    result = export_plan_html(plan_obj, songs, output_path, filter_type=filter_type, missing_refs=missing_refs)
 
     filter_msg = ""
     if filter_type == "missing":
@@ -1188,21 +1264,25 @@ def plan_export(plan_id, output, missing_only, exists_only):
 
     click.echo(f"{E_OK} 已导出计划「{plan_obj.name}」到：{output_path} {filter_msg}")
     click.echo(f"   有效歌曲: {len(songs)} 首" + (f"（{missing_refs} 首引用已删除）" if missing_refs else ""))
-    click.echo(f"   总时长: {format_duration(global_dur)}, 总大小: {format_file_size(global_size)}")
-    if missing:
-        click.echo(f"   缺失文件: {missing} 个 {E_WARN}")
+    click.echo(f"   筛选后歌曲: {result['total_songs']} 首, 总时长: {format_duration(result['total_duration'])}, 总大小: {format_file_size(result['total_size'])}")
+    if filter_type == "missing":
+        click.echo(f"   缺失文件项: {result['missing_files']} 个 {E_WARN}")
+    elif filter_type == "exists":
+        click.echo(f"   存在文件项: {result['total_files'] - result['missing_files']} 个 {E_OK}")
+    else:
+        if result["missing_files"]:
+            click.echo(f"   缺失文件: {result['missing_files']} 个 {E_WARN}")
 
 
-@plan.command("collect")
+@plan.command("check")
 @click.argument("plan_id")
-@click.option("--output-dir", "-o", required=True, help="目标收集目录")
-@click.option("--copy-mixes/--no-copy-mixes", default=True, help="是否同时复制混音文件，默认是")
-@click.option("--yes", is_flag=True, help="跳过确认")
-def plan_collect(plan_id, output_dir, copy_mixes, yes):
+@click.option("--output-dir", "-o", default=None, help="输出目录，默认当前目录")
+@click.option("--name", "-n", default=None, help="文件名前缀（不含扩展名）")
+def plan_check(plan_id, output_dir, name):
     """
-    收集整个计划的素材到指定目录
+    生成录音前检查包（Markdown + HTML + CSV 三份清单）
 
-    每首歌单独创建子文件夹，复制所有相关文件，并生成总清单和HTML报告
+    按歌曲列出干声、伴奏、混音是否齐备，并标注下一步（补录/混音）
     """
     store = get_store()
     plan_obj = store.get_plan(plan_id)
@@ -1216,12 +1296,80 @@ def plan_collect(plan_id, output_dir, copy_mixes, yes):
     # 获取有效歌曲
     songs = []
     missing_refs = 0
+    invalid_ids = []
+    for sid in plan_obj.song_ids:
+        song = store.get_song(sid)
+        if song:
+            songs.append(song)
+        else:
+            missing_refs += 1
+            invalid_ids.append(sid)
+
+    if not songs:
+        click.echo(f"{E_ERR} 计划中没有可检查的有效歌曲", err=True)
+        sys.exit(1)
+
+    output_dir = output_dir or os.getcwd()
+    base_name = name or f"plan_{plan_obj.id}_checklist"
+
+    result = generate_check_package(
+        songs,
+        output_dir,
+        base_name=base_name,
+        plan=plan_obj,
+    )
+
+    click.echo(f"{E_OK} 录音前检查包已生成！")
+    click.echo(f"   计划: {plan_obj.name}")
+    click.echo(f"   有效歌曲: {result['total_songs']} 首" + (f"（{missing_refs} 首引用已删除）" if missing_refs else ""))
+    click.echo(f"   素材齐备: {result['ready_songs']} 首")
+    if result["vocal_missing"]:
+        click.echo(f"   缺少干声: {result['vocal_missing']} 首 {E_WARN}")
+    if result["inst_missing"]:
+        click.echo(f"   缺少伴奏: {result['inst_missing']} 首 {E_WARN}")
+    click.echo(f"")
+    click.echo(f"   Markdown: {result['md_path']}")
+    click.echo(f"   CSV:      {result['csv_path']}")
+    click.echo(f"   HTML:     {result['html_path']}")
+
+    if missing_refs:
+        click.echo(f"\n{E_WARN}  有 {missing_refs} 首歌曲引用已失效，可使用 'plan clean {plan_id}' 清理")
+
+
+@plan.command("collect")
+@click.argument("plan_id")
+@click.option("--output-dir", "-o", required=True, help="目标收集目录")
+@click.option("--copy-mixes/--no-copy-mixes", default=True, help="是否同时复制混音文件，默认是")
+@click.option("--yes", is_flag=True, help="跳过确认")
+@click.option("--dry-run", is_flag=True, help="预览模式：只显示将要复制的文件，不实际复制")
+@click.option("--zip", "zip_output", is_flag=True, help="打包为 zip 文件")
+def plan_collect(plan_id, output_dir, copy_mixes, yes, dry_run, zip_output):
+    """
+    收集整个计划的素材到指定目录
+
+    每首歌单独创建子文件夹，复制所有相关文件，并生成总清单和HTML报告
+    """
+    import shutil
+    store = get_store()
+    plan_obj = store.get_plan(plan_id)
+    if not plan_obj:
+        click.echo(f"{E_ERR} 未找到计划 ID: {plan_id}", err=True)
+        sys.exit(1)
+
+    # 去重
+    plan_obj.set_song_ids(plan_obj.song_ids)
+
+    # 获取有效歌曲
+    songs = []
+    missing_refs = 0
+    invalid_ids = []
     for sid in plan_obj.song_ids:
         s = store.get_song(sid)
         if s:
             songs.append(s)
         else:
             missing_refs += 1
+            invalid_ids.append(sid)
 
     if not songs:
         click.echo(f"{E_ERR} 计划中没有可收集的有效歌曲", err=True)
@@ -1231,6 +1379,10 @@ def plan_collect(plan_id, output_dir, copy_mixes, yes):
     safe_plan_name = "".join(c for c in plan_obj.name if c.isalnum() or c in safe_chars).strip()
     safe_plan_name = safe_plan_name or f"plan_{plan_obj.id}"
     plan_dir = os.path.join(output_dir, f"{safe_plan_name}_{plan_obj.id}")
+
+    zip_path = None
+    if zip_output:
+        zip_path = plan_dir + ".zip"
 
     # 预览
     total_files = 0
@@ -1264,8 +1416,15 @@ def plan_collect(plan_id, output_dir, copy_mixes, yes):
         if song_missing:
             missing_summary.append(f"{song.title}: 缺少 {', '.join(song_missing)}")
 
-    click.echo(f"即将收集计划「{plan_obj.name}」的素材：")
-    click.echo(f"  目标目录: {plan_dir}")
+    mode_label = "[DRY-RUN] 预览" if dry_run else "即将收集"
+    if zip_output and not dry_run:
+        mode_label = "即将打包"
+
+    click.echo(f"{mode_label}计划「{plan_obj.name}」的素材：")
+    if zip_output:
+        click.echo(f"  目标文件: {zip_path}")
+    else:
+        click.echo(f"  目标目录: {plan_dir}")
     click.echo(f"  歌曲数量: {len(songs)} 首" + (f"（{missing_refs} 首引用已删除）" if missing_refs else ""))
     click.echo(f"  文件总数: {total_files} 个")
     click.echo(f"  总大小: {format_file_size(total_size)}")
@@ -1275,21 +1434,33 @@ def plan_collect(plan_id, output_dir, copy_mixes, yes):
         for m in missing_summary:
             click.echo(f"    - {m}")
 
-    if not yes:
-        click.confirm(f"\n确定要收集到 {plan_dir} 吗？", abort=True)
+    if dry_run:
+        click.echo(f"\n{SYM_STATS} 预览模式，未执行实际操作")
+        return
 
-    os.makedirs(plan_dir, exist_ok=True)
+    if not yes:
+        target_desc = zip_path if zip_output else plan_dir
+        click.confirm(f"\n确定要收集到 {target_desc} 吗？", abort=True)
+
+    # 如果是 zip 模式，创建临时目录
+    work_dir = plan_dir
+    temp_dir = None
+    if zip_output:
+        import tempfile
+        temp_dir = tempfile.mkdtemp(prefix="cover_collect_")
+        work_dir = os.path.join(temp_dir, f"{safe_plan_name}_{plan_obj.id}")
+
+    os.makedirs(work_dir, exist_ok=True)
 
     # 逐个收集歌曲
     collected = []
     for song, song_files, song_missing, _ in per_song_info:
         safe_name = "".join(c for c in song.title if c.isalnum() or c in safe_chars).strip()
         safe_name = safe_name or f"song_{song.id}"
-        song_dir = os.path.join(plan_dir, f"{safe_name}_{song.id}")
+        song_dir = os.path.join(work_dir, f"{safe_name}_{song.id}")
         os.makedirs(song_dir, exist_ok=True)
 
         song_copied = []
-        import shutil
         for label, src in song_files:
             dst = os.path.join(song_dir, os.path.basename(src))
             if os.path.abspath(src) != os.path.abspath(dst):
@@ -1326,7 +1497,7 @@ def plan_collect(plan_id, output_dir, copy_mixes, yes):
         collected.append((song, song_dir, len(song_copied), manifest_path))
 
     # 总清单
-    total_manifest = os.path.join(plan_dir, "00_计划总清单.md")
+    total_manifest = os.path.join(work_dir, "00_计划总清单.md")
     with open(total_manifest, "w", encoding="utf-8") as f:
         f.write(f"# {plan_obj.name} - 完整素材总清单\n\n")
         if plan_obj.description:
@@ -1359,14 +1530,35 @@ def plan_collect(plan_id, output_dir, copy_mixes, yes):
                 f.write(f"- {E_WARN}  {m}\n")
 
     # 生成 HTML 报告
-    html_path = os.path.join(plan_dir, "00_素材清单.html")
+    html_path = os.path.join(work_dir, "00_素材清单.html")
     export_plan_html(plan_obj, songs, html_path)
 
-    click.echo(f"\n{E_OK} 计划素材收集完成！")
-    click.echo(f"   目录: {plan_dir}")
-    click.echo(f"   收集了 {len(collected)} 首歌，{total_files} 个文件")
-    click.echo(f"   总清单: {total_manifest}")
-    click.echo(f"   HTML报告: {html_path}")
+    # zip 模式：打包并清理临时目录
+    if zip_output:
+        import zipfile
+        click.echo(f"\n正在打包为 zip 文件...")
+        os.makedirs(output_dir, exist_ok=True)
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(work_dir):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    arcname = os.path.relpath(full_path, temp_dir)
+                    zf.write(full_path, arcname)
+        # 清理临时目录
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        final_size = format_file_size(os.path.getsize(zip_path))
+        click.echo(f"\n{E_OK} 计划素材打包完成！")
+        click.echo(f"   Zip文件: {zip_path}")
+        click.echo(f"   包含 {len(collected)} 首歌，{total_files} 个文件")
+        click.echo(f"   压缩后大小: {final_size}")
+    else:
+        click.echo(f"\n{E_OK} 计划素材收集完成！")
+        click.echo(f"   目录: {plan_dir}")
+        click.echo(f"   收集了 {len(collected)} 首歌，{total_files} 个文件")
+        click.echo(f"   总清单: {total_manifest}")
+        click.echo(f"   HTML报告: {html_path}")
+
     if missing_refs:
         click.echo(f"   {E_WARN}  有 {missing_refs} 首歌曲引用已删除，已跳过")
 
